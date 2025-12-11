@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="義大癌醫疫苗冰箱溫度監控智能系統 - 適用於 GitHub Pages 部署">
+    <title>義大癌醫疫苗冰箱溫度監控智能系統</title>
+    
+    <!-- 1. 引入必要的函式庫 (CDN) -->
+    <!-- Tailwind CSS: 快速樣式設計 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js: 繪製溫度趨勢圖 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Annotation Plugin: 用於繪製警示紅線/藍線 -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+    <!-- Tesseract.js: 用於 OCR 影像辨識 -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <!-- FontAwesome: 圖示庫 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* --- 核心樣式區 --- */
+        body { -webkit-tap-highlight-color: transparent; }
+        input[type="month"], select, button { cursor: pointer; }
+        
+        input[type="number"], input[type="text"] {
+            width: 100%;
+            padding: 4px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            text-align: center;
+        }
+        input:focus {
+            outline: 2px solid #3b82f6;
+            border-color: transparent;
+        }
+
+        /* Modal (彈出視窗) 通用樣式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            padding: 20px;
+            border-radius: 12px;
+            width: 95%;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* OCR Loading 遮罩 */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        /* 簽名畫布 */
+        canvas.signature-pad {
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            cursor: crosshair;
+            touch-action: none; /* 關鍵：防止手機操作時滑動頁面 */
+            background-color: #f8fafc;
+            width: 100%;
+            height: 200px;
+        }
+
+        /* 簽名縮圖 (預覽用) */
+        .sig-preview {
+            height: 40px;
+            width: auto;
+            border-bottom: 1px solid #e2e8f0;
+            display: inline-block;
+        }
+
+        /* 整層掃描按鈕樣式 */
+        .layer-ocr-btn {
+            background-color: #e0f2fe; /* blue-100 */
+            color: #0284c7; /* sky-600 */
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            border: 1px solid #bae6fd;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-left: 6px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .layer-ocr-btn:hover {
+            background-color: #0284c7;
+            color: white;
+            border-color: #0284c7;
+        }
+
+        /* --- 列印專用樣式 (@media print) --- */
+        @media print {
+            @page {
+                /* 雖然 JS 會動態設定，這裡保留預設值 */
+                margin: 5mm; 
+            }
+
+            /* 關鍵：強制 html 和 body 填滿且不溢出 */
+            html, body {
+                height: 100%;
+                width: 100%;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important; 
+            }
+
+            body {
+                background-color: white !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                font-size: 10pt;
+            }
+
+            /* 隱藏網頁介面元素 */
+            .no-print, .modal, .loading-overlay, .layer-ocr-btn { display: none !important; }
+            .print-only { display: block !important; }
+            
+            /* 移除陰影與裝飾，節省墨水 */
+            .shadow, .shadow-md, .border-l-4, .rounded-lg {
+                box-shadow: none !important;
+                border: none !important;
+                border-radius: 0 !important;
+            }
+
+            /* --- 模式 A: 月報表 (表格) --- */
+            body.print-mode-table .chart-section { display: none !important; }
+            body.print-mode-table .table-section { display: block !important; width: 100%; }
+            body.print-mode-table table th, body.print-mode-table table td {
+                border: 1px solid #000 !important;
+                padding: 2px 4px !important;
+            }
+            
+            /* 簽名圖檔在列印時的大小控制 */
+            .sig-img-print {
+                max-height: 25px; 
+                max-width: 60px;
+                object-fit: contain;
+            }
+
+            /* --- 模式 B: 趨勢圖 (強制單頁極致修正) --- */
+            body.print-mode-chart .table-section { display: none !important; }
+            
+            /* 圖表區塊滿版設定 */
+            body.print-mode-chart .chart-section { 
+                display: flex !important; 
+                flex-direction: column;
+                justify-content: space-between; /* 上下分佈 (標題-圖-簽名) */
+                align-items: center;
+                height: 100% !important; /* 絕對填滿頁面高度 */
+                width: 100% !important; 
+                page-break-inside: avoid;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+            }
+
+            /* 圖表標題 */
+            body.print-mode-chart #chartTitle {
+                font-size: 16pt !important;
+                margin-top: 0 !important;
+                margin-bottom: 5px !important;
+                text-align: center;
+                width: 100%;
+                flex-shrink: 0; 
+            }
+
+            /* 圖表容器：自動縮放填滿剩餘空間 */
+            body.print-mode-chart #chartContainer { 
+                flex: 1 1 auto !important; /* 吃掉所有剩餘高度 */
+                width: 98% !important; /* 左右留一點白邊 */
+                height: auto !important; 
+                min-height: 0 !important; /* 關鍵：允許 Flex 子元素縮小，防止撐開 */
+                margin: 0 auto !important;
+                position: relative !important;
+            }
+            
+            /* Canvas 填滿容器 */
+            body.print-mode-chart #tempChart {
+                width: 100% !important;
+                height: 100% !important;
+            }
+
+            /* 簽名區：固定在底部 */
+            body.print-mode-chart .chart-footer-signatures {
+                display: flex !important;
+                width: 100%;
+                justify-content: space-around;
+                margin-top: 5px !important;
+                margin-bottom: 0 !important;
+                padding-bottom: 0 !important;
+                font-size: 12pt;
+                font-weight: bold;
+                flex-shrink: 0;
+            }
+        }
+        
+        .print-only { display: none; }
+        .chart-footer-signatures { display: none; }
+    </style>
+    <!-- 用於動態插入 @page 規則 (控制直印/橫印) -->
+    <style id="page-style"></style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+
+    <!-- 頂部導航列 -->
+    <div class="bg-teal-700 text-white p-4 shadow-md no-print sticky top-0 z-50">
+        <div class="container mx-auto flex justify-between items-center flex-wrap gap-3">
+            <h1 class="font-bold flex flex-col">
+                <span class="text-xl flex items-center">
+                    <i class="fa-solid fa-temperature-half mr-2"></i>
+                    義大癌醫疫苗冰箱溫度監控智能系統
+                </span>
+                <span class="text-xs font-normal opacity-80 md:ml-6 mt-1">E-Da Cancer Hospital Vaccine Cold Chain Smart Monitor System</span>
+            </h1>
+            
+            <div class="flex gap-2 text-sm flex-wrap mt-2 md:mt-0">
+                <!-- 檔案備份區 -->
+                <div class="bg-teal-800 p-1 rounded flex gap-1 border border-teal-600">
+                    <button onclick="exportData()" class="bg-teal-600 hover:bg-teal-500 px-3 py-1.5 rounded transition" title="下載備份 JSON">
+                        <i class="fa-solid fa-download"></i> 匯出
+                    </button>
+                    <button onclick="document.getElementById('importFile').click()" class="bg-teal-600 hover:bg-teal-500 px-3 py-1.5 rounded transition" title="還原備份 JSON">
+                        <i class="fa-solid fa-upload"></i> 匯入
+                    </button>
+                    <input type="file" id="importFile" accept=".json" class="hidden" onchange="importData(this)">
+                </div>
+
+                <!-- 操作區 -->
+                <button onclick="saveData(true)" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded transition shadow border border-blue-400 font-bold">
+                    <i class="fa-solid fa-floppy-disk"></i> 暫存
+                </button>
+                <button onclick="showPrintModal()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded transition shadow border border-indigo-400 font-bold">
+                    <i class="fa-solid fa-print"></i> 列印
+                </button>
+                <button onclick="clearData()" class="bg-red-600 hover:bg-red-500 px-4 py-1.5 rounded transition shadow border border-red-400 font-bold">
+                    <i class="fa-solid fa-trash-can"></i> 清除
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto p-4 max-w-7xl">
+        
+        <!-- OCR 隱藏 Input (用於觸發手機相機) -->
+        <input type="file" id="ocrInput" accept="image/*" capture="environment" class="hidden" onchange="processOCR(this)">
+        
+        <!-- 1. 選擇區 (日期與提示) -->
+        <div class="bg-white p-6 rounded-lg shadow mb-6 no-print border-l-4 border-teal-500">
+            <div class="flex flex-wrap items-end gap-6">
+                <div>
+                    <label class="block text-sm font-bold mb-1 text-gray-600"><i class="fa-regular fa-calendar mr-1"></i>1. 選擇月份</label>
+                    <input type="month" id="monthPicker" class="border p-2 rounded w-48 shadow-sm cursor-pointer hover:bg-gray-50 transition font-bold text-lg text-teal-700" 
+                           onclick="openDatepicker(this)" onchange="changeMonth()">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold mb-1 text-gray-600"><i class="fa-regular fa-clock mr-1"></i>2. 選擇日期</label>
+                    <select id="dayPicker" class="border p-2 rounded w-32 shadow-sm cursor-pointer hover:bg-gray-50 transition font-bold text-lg" onchange="loadDayData()">
+                        <!-- JS 動態生成日期選項 -->
+                    </select>
+                </div>
+                <div class="text-sm text-gray-500 bg-gray-50 p-2 rounded border border-gray-200">
+                    <i class="fa-solid fa-camera mr-1"></i> 提示：點擊「第X層」旁的 <span class="text-sky-600 font-bold">掃描</span> 按鈕，即可一次辨識 <span class="font-bold">Max、Min、當下</span> 三個溫度。
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 輸入區塊 (上午 AM / 下午 PM) -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 no-print">
+            <!-- AM 區塊 -->
+            <div class="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-blue-700">☀️ 上午 (AM)</h3>
+                    <!-- 簽名按鈕區 -->
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm font-bold">簽名:</label>
+                        <div id="am-sig-container" class="h-10 w-24 border border-gray-300 bg-gray-50 rounded flex items-center justify-center overflow-hidden relative bg-white cursor-pointer" onclick="openSignaturePad('am')">
+                            <span class="text-xs text-gray-400 select-none">點擊簽名</span>
+                            <img id="am-sig-img" class="absolute top-0 left-0 w-full h-full object-contain hidden" />
+                        </div>
+                    </div>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-600">
+                            <th class="p-2 text-left w-24">層數 (相機)</th>
+                            <th class="p-2">最高 (Max)</th>
+                            <th class="p-2">最低 (Min)</th>
+                            <th class="p-2">當下 (Cur)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="am-tbody">
+                        <!-- JS 動態生成 5 層輸入框 -->
+                    </tbody>
+                    <tfoot class="bg-blue-50 font-bold border-t-2 border-blue-100">
+                        <tr>
+                            <td class="p-2">最終參考</td>
+                            <td class="p-2 text-center text-red-600 text-lg" id="am-final-max">-</td>
+                            <td class="p-2 text-center text-blue-600 text-lg" id="am-final-min">-</td>
+                            <td class="p-2 text-center text-green-600 text-lg" id="am-final-avg">-</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <!-- PM 區塊 -->
+            <div class="bg-white p-6 rounded-lg shadow border-l-4 border-orange-500">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-orange-700">🌙 下午 (PM)</h3>
+                    <!-- 簽名按鈕區 -->
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm font-bold">簽名:</label>
+                        <div id="pm-sig-container" class="h-10 w-24 border border-gray-300 bg-gray-50 rounded flex items-center justify-center overflow-hidden relative bg-white cursor-pointer" onclick="openSignaturePad('pm')">
+                            <span class="text-xs text-gray-400 select-none">點擊簽名</span>
+                            <img id="pm-sig-img" class="absolute top-0 left-0 w-full h-full object-contain hidden" />
+                        </div>
+                    </div>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-600">
+                            <th class="p-2 text-left w-24">層數 (相機)</th>
+                            <th class="p-2">最高 (Max)</th>
+                            <th class="p-2">最低 (Min)</th>
+                            <th class="p-2">當下 (Cur)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pm-tbody">
+                        <!-- JS 動態生成 5 層輸入框 -->
+                    </tbody>
+                    <tfoot class="bg-orange-50 font-bold border-t-2 border-orange-100">
+                        <tr>
+                            <td class="p-2">最終參考</td>
+                            <td class="p-2 text-center text-red-600 text-lg" id="pm-final-max">-</td>
+                            <td class="p-2 text-center text-blue-600 text-lg" id="pm-final-min">-</td>
+                            <td class="p-2 text-center text-green-600 text-lg" id="pm-final-avg">-</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- 列印時顯示的標題 (平常隱藏) -->
+        <div class="print-only text-center mb-2">
+            <h2 class="text-2xl font-bold">義大癌醫疫苗冰箱溫度監測記錄表</h2>
+            <p class="text-lg mt-1 font-semibold">月份: <span id="printMonthLabel"></span></p>
+            <div class="flex justify-between text-xs text-gray-600 mt-2 px-4 border-b pb-2">
+                <span>標準範圍：2°C ~ 8°C</span>
+                <span>警示線：藍色 2°C / 紅色 8°C / 橘色 -10°C</span>
+            </div>
+        </div>
+
+        <!-- 3. 月報表總覽表格 (調整順序：移至圖表前) -->
+        <div class="bg-white p-6 rounded-lg shadow page-break border border-gray-200 table-section mb-6">
+            <h3 class="text-lg font-bold mb-4 no-print" id="summaryTitle">月報表總覽</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full border-collapse border border-gray-300 text-sm text-center">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th rowspan="2" class="border border-gray-400 p-1 w-10">日期</th>
+                            <th colspan="3" class="border border-gray-400 p-1 bg-blue-100">上午 (AM)</th>
+                            <th colspan="3" class="border border-gray-400 p-1 bg-orange-100">下午 (PM)</th>
+                            <th colspan="2" class="border border-gray-400 p-1 bg-gray-100">人員簽章</th>
+                            <th rowspan="2" class="border border-gray-400 p-1 w-20">備註</th>
+                        </tr>
+                        <tr class="bg-gray-100 font-semibold text-xs">
+                            <th class="border border-gray-400 p-1 w-10">最高</th>
+                            <th class="border border-gray-400 p-1 w-10">最低</th>
+                            <th class="border border-gray-400 p-1 w-10">當下</th>
+                            <th class="border border-gray-400 p-1 w-10">最高</th>
+                            <th class="border border-gray-400 p-1 w-10">最低</th>
+                            <th class="border border-gray-400 p-1 w-10">當下</th>
+                            <th class="border border-gray-400 p-1 w-16">上午</th>
+                            <th class="border border-gray-400 p-1 w-16">下午</th>
+                        </tr>
+                    </thead>
+                    <tbody id="monthlySummaryBody">
+                        <!-- JS 動態填入月報表 -->
+                    </tbody>
+                </table>
+            </div>
+            <!-- 列印版尾 (月報表用) -->
+            <div class="print-only mt-6 flex justify-between px-10 text-sm font-bold">
+                <div>管理藥師簽章: _________________</div>
+                <div>主任簽章: _________________</div>
+            </div>
+        </div>
+
+        <!-- 4. 趨勢圖表區 (調整順序：移至最下方) -->
+        <div class="bg-white p-4 rounded-lg shadow mb-6 break-inside-avoid border border-gray-200 chart-section">
+            <h3 class="text-lg font-bold mb-2 text-gray-700" id="chartTitle">
+                <i class="fa-solid fa-chart-line mr-2"></i>冰箱溫度記錄表(溫度趨勢圖)
+            </h3>
+            <!-- 增加圖表高度以利視覺辨識 -->
+            <div id="chartContainer" style="position: relative; height: 450px; width: 100%;">
+                <canvas id="tempChart"></canvas>
+            </div>
+            <!-- 圖表下方簽名欄 (列印圖表模式時顯示) -->
+            <div class="chart-footer-signatures mt-8 flex justify-between px-16 text-lg font-bold text-gray-800">
+                <div class="px-4">管理藥師簽章: _________________</div>
+                <div class="px-4">主管簽章: _________________</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay (OCR 進行中顯示) -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <i class="fa-solid fa-spinner fa-spin text-5xl mb-4 text-blue-400"></i>
+        <div class="text-xl font-bold">AI 影像辨識中...</div>
+        <div class="text-sm mt-2 text-gray-300">正在分析 Max / Min / Current 溫度...</div>
+        <canvas id="ocrCanvas" class="mt-4 border border-gray-500 hidden" width="300" height="100"></canvas>
+    </div>
+
+    <!-- 列印選項 Modal -->
+    <div id="printModal" class="modal">
+        <div class="modal-content">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">請選擇列印模式</h2>
+            <div class="flex flex-col gap-3">
+                <button onclick="printReport('table', this)" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-4 rounded-lg flex items-center justify-center gap-3 shadow transition">
+                    <i class="fa-solid fa-table text-xl w-8"></i>
+                    <div class="text-left flex-1">
+                        <div class="font-bold text-lg">月報表總覽</div>
+                        <div class="text-xs opacity-80">A4 直式 - 表格</div>
+                    </div>
+                </button>
+                <button onclick="printReport('chart', this)" class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-4 rounded-lg flex items-center justify-center gap-3 shadow transition">
+                    <i class="fa-solid fa-chart-line text-xl w-8"></i>
+                    <div class="text-left flex-1">
+                        <div class="font-bold text-lg">溫度趨勢圖</div>
+                        <div class="text-xs opacity-80">A4 橫式 - 單頁圖表</div>
+                    </div>
+                </button>
+            </div>
+            <button onclick="closePrintModal()" class="mt-6 text-gray-500 hover:text-gray-800 underline text-sm">取消</button>
+        </div>
+    </div>
+
+    <!-- 簽名板 Modal -->
+    <div id="signatureModal" class="modal">
+        <div class="modal-content">
+            <h2 class="text-lg font-bold mb-2">請在此簽名</h2>
+            <p class="text-xs text-gray-500 mb-2">請使用手指、觸控筆或滑鼠書寫</p>
+            
+            <canvas id="signatureCanvas" width="400" height="200" class="signature-pad"></canvas>
+            
+            <div class="flex justify-center gap-3 mt-4">
+                <button onclick="clearSignature()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">清除重寫</button>
+                <button onclick="saveSignature()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold">確認簽名</button>
+            </div>
+            <button onclick="closeSignatureModal()" class="mt-3 text-gray-500 underline text-sm">取消</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. 全域變數與初始化 ---
+        let currentYear, currentMonth;
+        let chartInstance = null;
+        const storageKey = "vaccine_fridge_data_universal"; // LocalStorage 儲存鍵值
+        
+        // OCR 相關
+        let currentOcrContext = null; // 儲存當前正在掃描的 { period: 'am', layer: 1 }
+
+        // 簽名板相關
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+        let currentSigTarget = ''; // 'am' or 'pm'
+        let canvas, ctx;
+
+        // 網頁載入完成後執行
+        document.addEventListener('DOMContentLoaded', () => {
+            try {
+                migrateOldData(); // 舊資料遷移(預防措施)
+                initSignaturePad(); // 初始化簽名板
+                
+                // 設定預設月份為當前月份
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = String(today.getMonth() + 1).padStart(2, '0');
+                
+                const monthPicker = document.getElementById('monthPicker');
+                if(monthPicker) { monthPicker.value = `${year}-${month}`; }
+                
+                initInputTables(); // 建立輸入表格
+                changeMonth();     // 載入該月資料
+            } catch (e) {
+                console.error("Init Error:", e);
+                alert("初始化錯誤，請重新整理頁面。");
+            }
+        });
+
+        // 輔助：開啟日期選擇器 (處理瀏覽器相容性)
+        function openDatepicker(el) { try { if(typeof el.showPicker === 'function') el.showPicker(); } catch(e){} }
+
+        // --- 2. OCR 影像辨識功能 (整層掃描) ---
+        function triggerLayerOCR(period, layer) {
+            currentOcrContext = { period, layer };
+            // 觸發隱藏的 file input，開啟相機或檔案選擇
+            document.getElementById('ocrInput').click();
+        }
+
+        async function processOCR(fileInput) {
+            if (!fileInput.files || !fileInput.files[0]) return;
+            
+            const file = fileInput.files[0];
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            loadingOverlay.style.display = 'flex'; // 顯示 Loading 遮罩
+
+            try {
+                // A. 圖片預處理 (增強對比，提高 7-segment 辨識率)
+                const processedImage = await preprocessImage(file);
+                
+                // B. 執行 Tesseract OCR
+                const worker = await Tesseract.createWorker('eng'); // 下載英文辨識模型
+                await worker.setParameters({
+                    tessedit_char_whitelist: '0123456789.-', // 白名單：只允許數字、點、負號
+                });
+
+                const ret = await worker.recognize(processedImage);
+                await worker.terminate(); // 釋放資源
+
+                console.log("OCR Raw Text:", ret.data.text);
+
+                // C. 提取與過濾數字
+                // Regex 抓取所有浮點數或整數 (例如: 5.2, 12, -2.1)
+                const numbers = ret.data.text.match(/-?\d+(\.\d+)?/g);
+
+                if (!numbers || numbers.length === 0) {
+                    throw new Error("未偵測到任何數字");
+                }
+
+                // 過濾不合理的數值 (假設疫苗冰箱範圍 -50 ~ 50，避免辨識出年份或雜訊)
+                let validNumbers = numbers
+                    .map(Number)
+                    .filter(n => !isNaN(n) && n > -50 && n < 50);
+
+                // 去除重複值
+                validNumbers = [...new Set(validNumbers)];
+                console.log("Valid Numbers:", validNumbers);
+
+                // D. 自動填入邏輯 (基於數值排序)
+                if (validNumbers.length > 0) {
+                    validNumbers.sort((a, b) => a - b); // 小 -> 大
+                    
+                    let maxVal, minVal, curVal;
+
+                    if (validNumbers.length >= 3) {
+                        // 抓到3個以上：最小=Min, 最大=Max, 中間(或第二個)=Cur
+                        minVal = validNumbers[0]; 
+                        maxVal = validNumbers[validNumbers.length - 1]; 
+                        curVal = validNumbers[1]; 
+                    } else if (validNumbers.length === 2) {
+                        // 只抓到2個：假設是 Min 和 Max
+                        minVal = validNumbers[0];
+                        maxVal = validNumbers[1];
+                        curVal = null; // 當下值不明
+                        alert(`偵測到 2 個數值 (${minVal}, ${maxVal})。已填入 Min/Max，請手動確認「當下」溫度。`);
+                    } else if (validNumbers.length === 1) {
+                        curVal = validNumbers[0];
+                        alert(`只偵測到 1 個數值 (${curVal})。已填入「當下」欄位。`);
+                    }
+
+                    // 填入對應的 Input
+                    if (currentOcrContext) {
+                        const { period, layer } = currentOcrContext;
+                        const row = document.querySelector(`.${period}-max[data-layer="${layer}"]`).closest('tr');
+                        
+                        if (maxVal !== undefined && maxVal !== null) {
+                            const input = row.querySelector(`.${period}-max`);
+                            input.value = maxVal;
+                            highlightInput(input);
+                        }
+                        if (minVal !== undefined && minVal !== null) {
+                            const input = row.querySelector(`.${period}-min`);
+                            input.value = minVal;
+                            highlightInput(input);
+                        }
+                        if (curVal !== undefined && curVal !== null) {
+                            const input = row.querySelector(`.${period}-cur`);
+                            input.value = curVal;
+                            highlightInput(input);
+                        }
+                        
+                        // 觸發總結計算
+                        calculateDailySummary(period);
+                    }
+                } else {
+                    alert("未能辨識出有效溫度數值，請調整角度重試。");
+                }
+
+            } catch (error) {
+                console.error("OCR Error:", error);
+                alert("辨識發生錯誤或未找到數字，請手動輸入。");
+            } finally {
+                loadingOverlay.style.display = 'none'; // 隱藏 Loading
+                fileInput.value = ''; // 重置 input 狀態
+                currentOcrContext = null;
+            }
+        }
+
+        // UX: 填入後閃爍綠色背景提示
+        function highlightInput(input) {
+            input.style.backgroundColor = '#d1fae5'; // light green
+            setTimeout(() => {
+                input.style.backgroundColor = '';
+            }, 1500);
+        }
+
+        // 影像預處理演算法
+        function preprocessImage(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    const maxDimension = 1000;
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    // 等比例縮放，避免過大圖片導致處理過慢
+                    if (width > height) {
+                        if (width > maxDimension) {
+                            height *= maxDimension / width;
+                            width = maxDimension;
+                        }
+                    } else {
+                        if (height > maxDimension) {
+                            width *= maxDimension / height;
+                            height = maxDimension;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    const imageData = ctx.getImageData(0, 0, width, height);
+                    const data = imageData.data;
+                    
+                    // 灰階與對比度增強
+                    const contrast = 50; // 0~100 強度
+                    const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        // 轉灰階 (Average method)
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        
+                        // 應用對比度公式
+                        let newColor = factor * (avg - 128) + 128;
+                        newColor = Math.max(0, Math.min(255, newColor));
+
+                        data[i] = newColor;     // R
+                        data[i + 1] = newColor; // G
+                        data[i + 2] = newColor; // B
+                    }
+                    
+                    ctx.putImageData(imageData, 0, 0);
+                    resolve(canvas.toDataURL('image/jpeg'));
+                };
+                img.onerror = reject;
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        // --- 3. 簽名板功能 (Canvas) ---
+        function initSignaturePad() {
+            canvas = document.getElementById('signatureCanvas');
+            ctx = canvas.getContext('2d');
+            
+            // 滑鼠事件
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+
+            // 觸控事件 (支援平板/手機)
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault(); 
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                lastX = touch.clientX - rect.left;
+                lastY = touch.clientY - rect.top;
+                isDrawing = true;
+            });
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!isDrawing) return;
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const x = touch.clientX - rect.left;
+                const y = touch.clientY - rect.top;
+                drawLine(lastX, lastY, x, y);
+                lastX = x;
+                lastY = y;
+            });
+            canvas.addEventListener('touchend', stopDrawing);
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            drawLine(lastX, lastY, e.offsetX, e.offsetY);
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function drawLine(x1, y1, x2, y2) {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+
+        function stopDrawing() { isDrawing = false; }
+
+        function openSignaturePad(target) {
+            currentSigTarget = target;
+            document.getElementById('signatureModal').style.display = 'flex';
+            clearSignature();
+            resizeCanvas(); // 確保 Canvas 解析度正確
+        }
+
+        // 處理視網膜螢幕解析度 (Retina Display)
+        function resizeCanvas() {
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            canvas.width = canvas.offsetWidth * ratio;
+            canvas.height = canvas.offsetHeight * ratio;
+            ctx.scale(ratio, ratio);
+        }
+
+        function closeSignatureModal() {
+            document.getElementById('signatureModal').style.display = 'none';
+        }
+
+        function clearSignature() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function saveSignature() {
+            // 優化：建立小型 Canvas 壓縮圖片，避免存入過大 Base64 字串
+            const targetWidth = 300; 
+            const scale = targetWidth / canvas.width;
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = targetWidth;
+            tempCanvas.height = canvas.height * scale;
+            
+            const tCtx = tempCanvas.getContext('2d');
+            tCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+            
+            const dataUrl = tempCanvas.toDataURL('image/png');
+            
+            // 更新 UI
+            const imgEl = document.getElementById(`${currentSigTarget}-sig-img`);
+            const container = document.getElementById(`${currentSigTarget}-sig-container`);
+            
+            imgEl.src = dataUrl;
+            imgEl.classList.remove('hidden');
+            container.querySelector('span').classList.add('hidden');
+            
+            // 自動存檔
+            saveData(false);
+            closeSignatureModal();
+        }
+
+        // --- 4. 列印控制 ---
+        function showPrintModal() { document.getElementById('printModal').style.display = "flex"; }
+        function closePrintModal() { document.getElementById('printModal').style.display = "none"; }
+
+        function printReport(type, btnElement) {
+            const originalText = btnElement.innerHTML;
+            btnElement.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 處理中...';
+            
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    try {
+                        closePrintModal();
+                        btnElement.innerHTML = originalText;
+                        const body = document.body;
+                        const style = document.getElementById('page-style');
+                        
+                        body.classList.remove('print-mode-table', 'print-mode-chart');
+
+                        if (type === 'table') {
+                            body.classList.add('print-mode-table');
+                            style.innerHTML = '@page { size: portrait; margin: 10mm; }'; // 直印
+                            window.print();
+                        } 
+                        else if (type === 'chart') {
+                            body.classList.add('print-mode-chart');
+                            style.innerHTML = '@page { size: landscape; margin: 5mm; }'; // 橫印
+                            
+                            if (chartInstance) chartInstance.resize();
+                            
+                            requestAnimationFrame(() => {
+                                window.print();
+                            });
+                        }
+                    } catch (e) {
+                        alert("列印啟動失敗");
+                        btnElement.innerHTML = originalText;
+                    }
+                });
+            });
+        }
+
+        // --- 5. 資料存取與計算邏輯 ---
+        function migrateOldData() {
+            if (!localStorage.getItem(storageKey)) {
+                const v3 = localStorage.getItem("vaccine_fridge_data_v3");
+                if (v3) localStorage.setItem(storageKey, v3);
+            }
+        }
+
+        function initInputTables() {
+            const layers = 5;
+            const amBody = document.getElementById('am-tbody');
+            const pmBody = document.getElementById('pm-tbody');
+            let amHtml = '', pmHtml = '';
+            
+            for (let i = 1; i <= layers; i++) {
+                // 每層的 OCR 按鈕 HTML
+                const ocrBtn = (period) => `
+                    <button class="layer-ocr-btn no-print" onclick="triggerLayerOCR('${period}', ${i})">
+                        <i class="fa-solid fa-camera"></i> 掃描
+                    </button>
+                `;
+
+                amHtml += `
+                    <tr>
+                        <td class="p-2 font-semibold text-gray-700 whitespace-nowrap">
+                            第 ${i} 層 ${ocrBtn('am')}
+                        </td>
+                        <td class="p-1"><input type="number" step="0.1" class="am-max bg-gray-50 focus:bg-white" data-layer="${i}" onchange="calculateDailySummary('am')"></td>
+                        <td class="p-1"><input type="number" step="0.1" class="am-min bg-gray-50 focus:bg-white" data-layer="${i}" onchange="calculateDailySummary('am')"></td>
+                        <td class="p-1"><input type="number" step="0.1" class="am-cur bg-gray-50 focus:bg-white" data-layer="${i}" onchange="calculateDailySummary('am')"></td>
+                    </tr>`;
+                pmHtml += `
+                    <tr>
+                        <td class="p-2 font-semibold text-gray-700 whitespace-nowrap">
+                            第 ${i} 層 ${ocrBtn('pm')}
+                        </td>
+                        <td class="p-1"><input type="number" step="0.1" class="pm-max bg-gray-50 focus:bg-white" data-layer="${i}" onchange="calculateDailySummary('pm')"></td>
+                        <td class="p-1"><input type="number" step="0.1" class="pm-min bg-gray-50 focus:bg-white" data-layer="${i}" onchange="calculateDailySummary('pm')"></td>
+                        <td class="p-1"><input type="number" step="0.1" class="pm-cur bg-gray-50 focus:bg-white" data-layer="${i}" onchange="calculateDailySummary('pm')"></td>
+                    </tr>`;
+            }
+            amBody.innerHTML = amHtml;
+            pmBody.innerHTML = pmHtml;
+        }
+
+        function changeMonth() {
+            const picker = document.getElementById('monthPicker').value;
+            if (!picker) return;
+            [currentYear, currentMonth] = picker.split('-').map(Number);
+            
+            // 更新列印版面與網頁版面的標題文字
+            const formattedDate = `${currentYear} 年 ${currentMonth} 月`;
+            document.getElementById('printMonthLabel').textContent = formattedDate;
+            document.getElementById('summaryTitle').textContent = `${formattedDate} 癌醫疫苗冰箱溫度監控月報表`;
+            document.getElementById('chartTitle').innerHTML = `<i class="fa-solid fa-chart-line mr-2"></i>${formattedDate} 冰箱溫度記錄表(溫度趨勢圖)`;
+
+            const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+            const dayPicker = document.getElementById('dayPicker');
+            dayPicker.innerHTML = '';
+            
+            // 預設選中當天
+            const today = new Date();
+            let defaultDay = 1;
+            if(today.getFullYear() === currentYear && (today.getMonth()+1) === currentMonth) {
+                defaultDay = today.getDate();
+            }
+
+            for (let i = 1; i <= daysInMonth; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.text = `${i} 日`;
+                if(i === defaultDay) option.selected = true;
+                dayPicker.appendChild(option);
+            }
+            loadDayData(); 
+            updateMonthlyReport(); 
+            updateChart(); 
+        }
+
+        function loadDayData() {
+            const day = document.getElementById('dayPicker').value;
+            const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+            const fullData = JSON.parse(localStorage.getItem(storageKey)) || {};
+            
+            // 清空所有輸入框
+            document.querySelectorAll('input[type="number"]').forEach(input => input.value = '');
+            
+            // 重置簽名 UI
+            const resetSig = (target) => {
+                document.getElementById(`${target}-sig-img`).src = "";
+                document.getElementById(`${target}-sig-img`).classList.add('hidden');
+                document.getElementById(`${target}-sig-container`).querySelector('span').classList.remove('hidden');
+            };
+            resetSig('am');
+            resetSig('pm');
+
+            if (fullData[monthKey] && fullData[monthKey][day]) {
+                const data = fullData[monthKey][day];
+                
+                // 載入 AM
+                if (data.am && data.am.layers) {
+                    data.am.layers.forEach(layer => {
+                        const row = document.querySelector(`.am-max[data-layer="${layer.id}"]`)?.closest('tr');
+                        if(row) {
+                            row.querySelector('.am-max').value = layer.max;
+                            row.querySelector('.am-min').value = layer.min;
+                            row.querySelector('.am-cur').value = layer.cur;
+                        }
+                    });
+                    if(data.am.sigImage) {
+                        const img = document.getElementById('am-sig-img');
+                        img.src = data.am.sigImage;
+                        img.classList.remove('hidden');
+                        document.getElementById('am-sig-container').querySelector('span').classList.add('hidden');
+                    }
+                }
+                
+                // 載入 PM
+                if (data.pm && data.pm.layers) {
+                    data.pm.layers.forEach(layer => {
+                        const row = document.querySelector(`.pm-max[data-layer="${layer.id}"]`)?.closest('tr');
+                        if(row) {
+                            row.querySelector('.pm-max').value = layer.max;
+                            row.querySelector('.pm-min').value = layer.min;
+                            row.querySelector('.pm-cur').value = layer.cur;
+                        }
+                    });
+                     if(data.pm.sigImage) {
+                        const img = document.getElementById('pm-sig-img');
+                        img.src = data.pm.sigImage;
+                        img.classList.remove('hidden');
+                        document.getElementById('pm-sig-container').querySelector('span').classList.add('hidden');
+                    }
+                }
+            }
+            // 重新計算每日總結 (不自動存檔)
+            calculateDailySummary('am', false);
+            calculateDailySummary('pm', false);
+        }
+
+        function calculateDailySummary(period, autoSave = true) {
+            const maxInputs = Array.from(document.querySelectorAll(`.${period}-max`));
+            const minInputs = Array.from(document.querySelectorAll(`.${period}-min`));
+            const curInputs = Array.from(document.querySelectorAll(`.${period}-cur`));
+            
+            const maxVals = maxInputs.map(i => parseFloat(i.value)).filter(v => !isNaN(v));
+            const minVals = minInputs.map(i => parseFloat(i.value)).filter(v => !isNaN(v));
+            const curVals = curInputs.map(i => parseFloat(i.value)).filter(v => !isNaN(v));
+
+            let finalMax = maxVals.length ? Math.max(...maxVals) : '-';
+            let finalMin = minVals.length ? Math.min(...minVals) : '-';
+            // 當下溫度取五層中最低溫
+            let finalAvg = curVals.length ? Math.min(...curVals) : '-';
+
+            document.getElementById(`${period}-final-max`).textContent = finalMax;
+            document.getElementById(`${period}-final-min`).textContent = finalMin;
+            document.getElementById(`${period}-final-avg`).textContent = finalAvg;
+
+            if (autoSave) saveData(false);
+        }
+
+        function saveData(showFeedback = false) {
+            try {
+                const day = document.getElementById('dayPicker').value;
+                const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+                
+                const fullData = JSON.parse(localStorage.getItem(storageKey)) || {};
+                if (!fullData[monthKey]) fullData[monthKey] = {};
+                
+                const amSigImg = document.getElementById('am-sig-img');
+                const pmSigImg = document.getElementById('pm-sig-img');
+                const amSigData = (!amSigImg.classList.contains('hidden')) ? amSigImg.src : null;
+                const pmSigData = (!pmSigImg.classList.contains('hidden')) ? pmSigImg.src : null;
+
+                const dailyData = {
+                    am: { ...getLayerData('am'), sigImage: amSigData },
+                    pm: { ...getLayerData('pm'), sigImage: pmSigData },
+                    summary: { am: getSummaryData('am'), pm: getSummaryData('pm') }
+                };
+
+                fullData[monthKey][day] = dailyData;
+                localStorage.setItem(storageKey, JSON.stringify(fullData));
+                
+                updateMonthlyReport();
+                updateChart();
+
+                if (showFeedback) alert(`✅ 儲存成功！\n日期：${currentYear}/${currentMonth}/${day}`);
+            } catch (error) {
+                console.error(error);
+                alert("❌ 儲存失敗 (空間不足)。請執行「匯出」備份後「清除」舊資料。");
+            }
+        }
+
+        function getLayerData(period) {
+            const layers = [];
+            for(let i=1; i<=5; i++) {
+                const row = document.querySelector(`.${period}-max[data-layer="${i}"]`).closest('tr');
+                layers.push({
+                    id: i,
+                    max: row.querySelector(`.${period}-max`).value,
+                    min: row.querySelector(`.${period}-min`).value,
+                    cur: row.querySelector(`.${period}-cur`).value
+                });
+            }
+            return { layers };
+        }
+
+        function getSummaryData(period) {
+            const maxEl = document.getElementById(`${period}-final-max`).textContent;
+            const minEl = document.getElementById(`${period}-final-min`).textContent;
+            const avgEl = document.getElementById(`${period}-final-avg`).textContent;
+            return {
+                max: maxEl !== '-' ? parseFloat(maxEl) : null,
+                min: minEl !== '-' ? parseFloat(minEl) : null,
+                cur: avgEl !== '-' ? parseFloat(avgEl) : null
+            };
+        }
+
+        function exportData() {
+            const data = localStorage.getItem(storageKey);
+            if (!data) { alert("無資料可匯出！"); return; }
+            const blob = new Blob([data], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `疫苗溫度備份_${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function importData(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    if (typeof json === 'object') {
+                        if(confirm('警告：匯入將覆蓋現有資料！確定要執行嗎？')) {
+                            localStorage.setItem(storageKey, JSON.stringify(json));
+                            alert("匯入成功！");
+                            location.reload();
+                        }
+                    } else alert("格式錯誤");
+                } catch (err) { alert("解析失敗"); }
+            };
+            reader.readAsText(file);
+            input.value = ''; 
+        }
+
+        function clearData() {
+            if(confirm('確定清除本月資料？')) {
+                const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+                const fullData = JSON.parse(localStorage.getItem(storageKey)) || {};
+                if (fullData[monthKey]) {
+                    delete fullData[monthKey];
+                    localStorage.setItem(storageKey, JSON.stringify(fullData));
+                    loadDayData();
+                    updateMonthlyReport();
+                    updateChart();
+                    alert('已清除。');
+                }
+            }
+        }
+
+        function updateMonthlyReport() {
+            const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+            const fullData = JSON.parse(localStorage.getItem(storageKey)) || {};
+            const monthData = fullData[monthKey] || {};
+            const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+            const tbody = document.getElementById('monthlySummaryBody');
+            tbody.innerHTML = '';
+
+            for (let i = 1; i <= daysInMonth; i++) {
+                const dayData = monthData[i] || { summary: { am: {}, pm: {} }, am: {}, pm: {} };
+                const am = dayData.summary?.am || {};
+                const pm = dayData.summary?.pm || {};
+                
+                const amSigHtml = dayData.am?.sigImage 
+                    ? `<img src="${dayData.am.sigImage}" class="sig-preview sig-img-print mx-auto">` 
+                    : '<span class="text-gray-300">-</span>';
+                const pmSigHtml = dayData.pm?.sigImage 
+                    ? `<img src="${dayData.pm.sigImage}" class="sig-preview sig-img-print mx-auto">` 
+                    : '<span class="text-gray-300">-</span>';
+
+                const dateObj = new Date(currentYear, currentMonth - 1, i);
+                const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+
+                const row = `
+                    <tr class="${isWeekend ? 'bg-gray-100' : 'bg-white'} border-b border-gray-300">
+                        <td class="border-r border-gray-300 p-1 font-bold align-middle">${i}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle ${getColor(am.max)}">${formatVal(am.max)}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle ${getColor(am.min)}">${formatVal(am.min)}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle">${formatVal(am.cur)}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle ${getColor(pm.max)}">${formatVal(pm.max)}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle ${getColor(pm.min)}">${formatVal(pm.min)}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle">${formatVal(pm.cur)}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle h-10 w-16">${amSigHtml}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle h-10 w-16">${pmSigHtml}</td>
+                        <td class="border-r border-gray-300 p-1 align-middle"></td>
+                    </tr>`;
+                tbody.innerHTML += row;
+            }
+        }
+
+        function formatVal(val) { return (val === null || val === undefined) ? '' : val; }
+        function getColor(val) {
+            if (val === null || val === undefined) return '';
+            if (val > 8) return 'text-red-600 font-bold';
+            if (val < 2) return 'text-blue-600 font-bold';
+            return '';
+        }
+
+        // --- Chart Transformation Logic ---
+        // 視覺對映 (0~100):
+        // 12度  -> 100
+        // 8度   -> 90  (區間 8~12 佔 10%)
+        // 2度   -> 40  (區間 2~8 佔 50%)
+        // -10度 -> 20  (區間 -10~2 佔 20%)
+        // -25度 -> 0   (區間 -25~-10 佔 20%)
+        const transformTemp = (t) => {
+            if (t === null || t === undefined) return null;
+            if (t > 8) return 90 + (t - 8) * (10 / 4);   // 8~12度 映射到 90~100
+            if (t >= 2) return 40 + (t - 2) * (50 / 6);  // 2~8度 映射到 40~90 (核心區放大)
+            if (t >= -10) return 20 + (t - (-10)) * (20 / 12); // -10~2度 映射到 20~40
+            return (t - (-25)) * (20 / 15);              // -25~-10度 映射到 0~20
+        };
+
+        function updateChart() {
+            const ctx = document.getElementById('tempChart');
+            if(!ctx || typeof Chart === 'undefined') return;
+
+            const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+            const fullData = JSON.parse(localStorage.getItem(storageKey)) || {};
+            const monthData = fullData[monthKey] || {};
+            const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+            const labels = [];
+            const rawDataMax = [], rawDataMin = [], rawDataCur = [];
+
+            for (let i = 1; i <= daysInMonth; i++) {
+                labels.push(`${i}日 AM`, `${i}日 PM`);
+                const d = monthData[i] || { summary: { am: {}, pm: {} } };
+                const am = d.summary?.am || {};
+                const pm = d.summary?.pm || {};
+                rawDataMax.push(am.max ?? null, pm.max ?? null);
+                rawDataMin.push(am.min ?? null, pm.min ?? null);
+                rawDataCur.push(am.cur ?? null, pm.cur ?? null);
+            }
+
+            if (chartInstance) chartInstance.destroy();
+
+            // 準備轉換後的數據給 Chart.js 繪圖
+            const dataMaxTransformed = rawDataMax.map(transformTemp);
+            const dataMinTransformed = rawDataMin.map(transformTemp);
+            const dataCurTransformed = rawDataCur.map(transformTemp);
+
+            // 定義要顯示的刻度 (對應真實溫度)
+            // 包含邊界與重要數值：12, 8, 2, -10, -25
+            const tickTemps = [12, 10, 8, 7, 6, 5, 4, 3, 2, 0, -10, -20, -25];
+
+            chartInstance = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: '最高溫', data: dataMaxTransformed, borderColor: '#ef4444', backgroundColor: '#ef444410', borderWidth: 1.5, tension: 0.1, pointRadius: 2, spanGaps: true },
+                        { label: '最低溫', data: dataMinTransformed, borderColor: '#3b82f6', backgroundColor: '#3b82f610', borderWidth: 1.5, tension: 0.1, pointRadius: 2, spanGaps: true },
+                        { label: '當下溫', data: dataCurTransformed, borderColor: '#10b981', backgroundColor: '#10b98110', borderWidth: 1.5, tension: 0.1, pointRadius: 2, spanGaps: true }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { 
+                            min: 0, 
+                            max: 100,
+                            title: { display: true, text: '溫度 (°C)' },
+                            afterBuildTicks: function(axis) {
+                                // 強制設定刻度位置為我們指定的溫度點
+                                axis.ticks = tickTemps.map(t => ({ value: transformTemp(t) }));
+                            },
+                            ticks: {
+                                callback: function(value, index, ticks) {
+                                    // 使用反算或是比對
+                                    const match = tickTemps.find(t => Math.abs(transformTemp(t) - value) < 0.01);
+                                    return match !== undefined ? match + '°C' : '';
+                                }
+                            }
+                        },
+                        x: { ticks: { autoSkip: false, maxRotation: 90, minRotation: 90, font: { size: 10 } } }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    // Tooltip 顯示原始溫度，而非轉換後的座標
+                                    let rawVal;
+                                    const dataIndex = context.dataIndex;
+                                    if (context.dataset.label === '最高溫') rawVal = rawDataMax[dataIndex];
+                                    if (context.dataset.label === '最低溫') rawVal = rawDataMin[dataIndex];
+                                    if (context.dataset.label === '當下溫') rawVal = rawDataCur[dataIndex];
+                                    return context.dataset.label + ': ' + (rawVal !== null ? rawVal + '°C' : '-');
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                line1: { 
+                                    type: 'line', 
+                                    yMin: transformTemp(2), yMax: transformTemp(2), 
+                                    borderColor: 'blue', borderWidth: 2, borderDash: [6, 6], 
+                                    label: { content: '2°C', display: true, backgroundColor: 'blue', color: 'white', font: {size: 10} } 
+                                },
+                                line2: { 
+                                    type: 'line', 
+                                    yMin: transformTemp(8), yMax: transformTemp(8), 
+                                    borderColor: 'red', borderWidth: 2, borderDash: [6, 6], 
+                                    label: { content: '8°C', display: true, backgroundColor: 'red', color: 'white', font: {size: 10} } 
+                                },
+                                line3: { 
+                                    type: 'line', 
+                                    yMin: transformTemp(-10), yMax: transformTemp(-10), 
+                                    borderColor: 'orange', borderWidth: 2, borderDash: [6, 6], 
+                                    label: { content: '-10°C', display: true, backgroundColor: 'orange', color: 'white', font: {size: 10} } 
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
